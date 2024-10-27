@@ -1,0 +1,206 @@
+#!/bin/sh
+
+SUNARCH="
+                                     __  
+   _______  ______  ____ ___________/ /_ 
+  / ___/ / / / __ \/ __ \`/ ___/ ___/ __ \\
+ (__  ) /_/ / / / / /_/ / /  / /__/ / / /
+/____/\__,_/_/ /_/\__,_/_/   \___/_/ /_/ 
+                                         
+"
+
+# Variables / Options
+
+TEST=false
+INSTALLEDLY=false # Used for ly setup
+
+XINITRC='
+PATH=$PATH:~/.local/bin/
+xset r rate 300 50
+picom --vsync &
+xwallpaper --zoom ~/.config/wall.png
+dwmblocks &
+dunst &
+(sleep 3; sxhkd) &
+exec dwm
+'
+
+# Repositories
+
+DWMREPO="https://github.com/sundownerfm/dwm.git"
+DWMBLOCKSREPO="https://github.com/sundownerfm/dwmblocks.git"
+DOTFILESREPO="https://github.com/sundownerfm/dotfiles.git"
+
+# Packages
+
+COREPKGS="git gcc make libxft libxinerama ttf-liberation ttf-sourcecodepro-nerd noto-fonts-emoji man htop fzf lf bc alacritty neovim qutebrowser python-adblock xwallpaper dmenu dunst picom sxhkd fish tmux scrot sxiv mpv yt-dlp xclip xorg-xrandr pulsemixer"
+PKGS="newsboat neofetch ncspot zathura zathura-pdf-mupdf keepassxc thunar noto-fonts-cjk" 
+# AURPKGS="brave-bin"
+AURPKGS=""
+DEVPKGS="rsync asio ascii boost clang go gopls lua-language-server python-lsp-server bash-language-server vscode-html-languageserver vscode-css-languageserver"
+DEVAURPKGS=""
+
+# Colors
+
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Functions
+
+guard () {
+    if [ $TEST = false ]; then
+        $@
+    fi
+}
+
+confirm () {
+    echo -n $1
+    read -p " [Y/n] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]] ; then
+        $2
+    fi
+}
+
+installpkgs () {
+    for pkg in "$@"
+    do
+        echo -n "Installing $pkg..."
+        guard sudo pacman --noconfirm --needed -S "$pkg" >/dev/null 2>&1
+        echo "done"
+    done
+}
+
+installaurpkgs () {
+    for pkg in "$@"
+    do
+        echo -n "Installing $pkg from AUR..."
+        guard yay --noconfirm --needed -S "$pkg" >/dev/null 2>&1
+        echo "done"
+    done
+}
+
+installdwm () {
+    git clone "$1"
+    cd "$2"
+    ls -a
+    guard sudo make clean install
+    cd ..
+    mv "$2" .config
+}
+
+installyay () {
+    installpkgs "go"
+    sudo git clone https://aur.archlinux.org/yay-git.git
+    sudo chown -R ${USER}:${USER} ./yay-git
+    cd yay-git
+    guard makepkg -si
+    cd ..
+    rm -rf yay-git
+}
+
+installloginmanager () {
+    installpkgs ly
+    guard sudo systemctl enable ly.service
+    chmod +x ~/.xinitrc
+    INSTALLEDLY=true
+}
+
+installextras () {
+    echo "Installing extra packages..."
+    installpkgs ${PKGS}
+    echo "Extra packages installed successfully"
+
+    echo "Configuring extra packages"
+
+    gsettings set org.gnome.desktop.interface gtk-theme Adwaita-dark
+    gsettings set org.gnome.desktop.interface color-scheme prefer-dark
+
+    echo "Finished configuring extra packages"
+}
+
+installdevpkgs () {
+    echo "Installing dev packages..."
+    installpkgs ${DEVPKGS}
+    installaurpkgs ${DEVAURPKGS}
+    echo "Extra packages installed successfully"
+}
+
+installextrasaur () {
+    echo "Installing extra AUR packages..."
+    installaurpkgs ${AURPKGS}
+    echo "Extra AUR packages installed successfully"
+}
+
+
+installdotfiles () {
+    git clone ${DOTFILESREPO}
+
+    rm -rf dotfiles/.git dotfiles/README.md
+
+    cp -rf dotfiles/* .
+    cp -rf dotfiles/.[!.]* .
+
+    rm -rf dotfiles
+}
+
+installbluetooth () {
+    installpkgs bluez blueman
+    confirm "Are you using pulseaudio?" "installpkgs pulseaudio-bluetooth"
+    echo "Installed bluetooth... you may need to reboot"
+}
+
+installcore () {
+    mkdir ~/.config
+    echo "Installing core packages..."
+    installpkgs ${COREPKGS}
+    echo "Core packages installed successfully"
+
+    # Install Packer for Neovim
+    git clone --depth 1 https://github.com/wbthomason/packer.nvim\
+        ~/.local/share/nvim/site/pack/packer/start/packer.nvim
+
+    guard sudo mkdir /usr/share/xsessions
+
+    installdwm ${DWMREPO} "dwm"
+    installdwm ${DWMBLOCKSREPO} "dwmblocks"
+
+    echo -n "${XINITRC}" >> .xinitrc
+
+    confirm "Install AUR helper? (yay)" installyay
+    confirm "Install login manager? (ly)" installloginmanager
+    confirm "Install extra packages?" installextras
+    confirm "Install dev packages?" installdevpkgs
+    confirm "Install extra AUR packages?" installextrasaur
+    confirm "Install bluetooth" installbluetooth
+    confirm "Install dotfiles?" installdotfiles
+
+    # Set Qutebrowser as Default Browser
+    xdg-settings set default-web-browser org.qutebrowser.qutebrowser.desktop
+
+    # Setup directories
+
+    echo "Setting up directories..."
+
+    mkdir ~/pic # Pictures
+    mkdir ~/pic/ss # Screenshots
+    mkdir ~/dl # Downloads
+    mkdir ~/git # Git repos
+    mkdir ~/dev # Development (scripts, code, etc.)
+
+    echo "Install complete."
+
+    if [ $INSTALLEDLY = true ]; then
+        guard sudo systemctl start ly.service
+    fi
+}
+
+printf "${BLUE}${SUNARCH}${NC}\n"
+
+if [[ $1 == "test" ]]; then
+    TEST=true
+    echo "TESTING"
+fi
+
+guard cd ~
+confirm "Proceed with install?" installcore
